@@ -210,7 +210,7 @@ export default function App() {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch("/corpus.tsv");
+        const res = await fetch(`${import.meta.env.BASE_URL}corpus.tsv`);
         if (!res.ok) {
           throw new Error(`HTTP ${res.status} ${res.statusText}`);
         }
