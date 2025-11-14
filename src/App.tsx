@@ -182,25 +182,25 @@ function Frame({
           </>
         ) : (
           <>
-            <Typography variant="h6">直前の結果</Typography>
+            <Typography variant="h6">採点結果</Typography>
 
             <Typography variant="subtitle2" sx={{ mt: 2 }}>
-              Japanese
+              原文
             </Typography>
             <Typography>{lastResult.jpn}</Typography>
 
             <Typography variant="subtitle2" sx={{ mt: 2 }}>
-              Model Answer
+              模範解答
             </Typography>
             <Typography>{lastResult.eng}</Typography>
 
             <Typography variant="subtitle2" sx={{ mt: 2 }}>
-              Your Answer
+              あなたの解答
             </Typography>
             <Typography>{lastResult.userAnswer}</Typography>
 
             <Typography variant="subtitle2" sx={{ mt: 2 }}>
-              Result
+              一致度合い
             </Typography>
             <Alert
               sx={{ mt: 0.5 }}
@@ -218,7 +218,7 @@ function Frame({
             </Alert>
 
             <Typography variant="subtitle2" sx={{ mt: 2 }}>
-              Grammar
+              簡易文法チェック
             </Typography>
             {lastResult.grammarMessages.map((msg, i) => (
               <Typography key={i} variant="body2">
@@ -231,7 +231,7 @@ function Frame({
 
       {/* 下部：現在の問題 */}
       <Paper sx={{ p: 3, borderRadius: 3 }}>
-        <Typography variant="subtitle2">Japanese (Current)</Typography>
+        <Typography variant="subtitle2">次の問題</Typography>
         <Typography variant="h6" sx={{ mt: 1 }}>
           {current.jpn}
         </Typography>
@@ -442,7 +442,7 @@ export default function App() {
         <Toolbar>
           <TranslateIcon sx={{ mr: 1 }} />
           <Typography variant="h6" sx={{ flexGrow: 1 }}>
-            Endless Translating App
+            Endless Translating
           </Typography>
         </Toolbar>
       </AppBar>
