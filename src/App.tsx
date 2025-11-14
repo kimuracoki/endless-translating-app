@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+// src/App.tsx
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   AppBar,
   Box,
@@ -14,6 +15,7 @@ import {
   Alert,
 } from "@mui/material";
 import TranslateIcon from "@mui/icons-material/Translate";
+import gsap from "gsap";
 
 // ===============================
 // 型定義
@@ -43,6 +45,11 @@ type LastResult = {
   userAnswer: string;
   evalText: string;
   grammarMessages: string[];
+};
+
+type FrameState = {
+  lastResult: LastResult | null;
+  current: CorpusPair;
 };
 
 // ===============================
@@ -138,17 +145,165 @@ async function checkGrammar(sentence: string): Promise<string[]> {
 }
 
 // ===============================
+// 一枚の「フレーム」（上:結果 / 下:問題）
+// ===============================
+
+type FrameProps = {
+  frame: FrameState;
+  userAnswer?: string;
+  checking?: boolean;
+  interactive?: boolean;
+  onChangeAnswer?: (v: string) => void;
+  onSubmit?: () => void;
+};
+
+function Frame({
+  frame,
+  userAnswer = "",
+  checking = false,
+  interactive = false,
+  onChangeAnswer,
+  onSubmit,
+}: FrameProps) {
+  const { lastResult, current } = frame;
+
+  return (
+    <Stack spacing={4}>
+      {/* 上部：直前の結果 or 説明 */}
+      <Paper sx={{ p: 3, borderRadius: 3 }}>
+        {!lastResult ? (
+          <>
+            <Typography variant="h5">無限英訳トレーニング</Typography>
+            <Typography variant="body2" sx={{ mt: 2 }}>
+              日本語が出ますので英訳してください。
+              採点後、この部分に直前の結果が表示されます。
+              常に「上：結果」「下：次の問題」の 2 ブロックだけです。
+            </Typography>
+          </>
+        ) : (
+          <>
+            <Typography variant="h6">直前の結果</Typography>
+
+            <Typography variant="subtitle2" sx={{ mt: 2 }}>
+              Japanese
+            </Typography>
+            <Typography>{lastResult.jpn}</Typography>
+
+            <Typography variant="subtitle2" sx={{ mt: 2 }}>
+              Model Answer
+            </Typography>
+            <Typography>{lastResult.eng}</Typography>
+
+            <Typography variant="subtitle2" sx={{ mt: 2 }}>
+              Your Answer
+            </Typography>
+            <Typography>{lastResult.userAnswer}</Typography>
+
+            <Typography variant="subtitle2" sx={{ mt: 2 }}>
+              Result
+            </Typography>
+            <Alert
+              sx={{ mt: 0.5 }}
+              severity={
+                lastResult.evalText.startsWith("◎")
+                  ? "success"
+                  : lastResult.evalText.startsWith("○")
+                  ? "info"
+                  : lastResult.evalText.startsWith("△")
+                  ? "warning"
+                  : "error"
+              }
+            >
+              {lastResult.evalText}
+            </Alert>
+
+            <Typography variant="subtitle2" sx={{ mt: 2 }}>
+              Grammar
+            </Typography>
+            {lastResult.grammarMessages.map((msg, i) => (
+              <Typography key={i} variant="body2">
+                {msg}
+              </Typography>
+            ))}
+          </>
+        )}
+      </Paper>
+
+      {/* 下部：現在の問題 */}
+      <Paper sx={{ p: 3, borderRadius: 3 }}>
+        <Typography variant="subtitle2">Japanese (Current)</Typography>
+        <Typography variant="h6" sx={{ mt: 1 }}>
+          {current.jpn}
+        </Typography>
+
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ mt: 2, display: "block" }}
+        >
+          Enter で改行、Ctrl+Enter / Cmd+Enter で「採点 → 次の問題へ」です。
+        </Typography>
+
+        <TextField
+          label="Your English"
+          multiline
+          fullWidth
+          minRows={2}
+          sx={{ mt: 1 }}
+          value={userAnswer}
+          onChange={
+            interactive
+              ? (e) => onChangeAnswer && onChangeAnswer(e.target.value)
+              : undefined
+          }
+          onKeyDown={
+            interactive
+              ? (e) => {
+                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    if (!checking) onSubmit && onSubmit();
+                  }
+                }
+              : undefined
+          }
+          InputProps={{
+            readOnly: !interactive,
+          }}
+        />
+
+        <Button
+          variant="contained"
+          sx={{ mt: 2 }}
+          onClick={interactive ? onSubmit : undefined}
+          disabled={checking || !interactive}
+        >
+          {checking ? "Checking..." : "採点 → 次の問題へ"}
+        </Button>
+      </Paper>
+    </Stack>
+  );
+}
+
+// ===============================
 // メイン
 // ===============================
 
 export default function App() {
   const [corpus, setCorpus] = useState<CorpusPair[]>([]);
-  const [current, setCurrent] = useState<CorpusPair | null>(null);
+  const [frame, setFrame] = useState<FrameState | null>(null); // 現在表示中の 1 フレーム
   const [loading, setLoading] = useState(true);
-  const [lastResult, setLastResult] = useState<LastResult | null>(null);
 
   const [userAnswer, setUserAnswer] = useState("");
   const [checking, setChecking] = useState(false);
+
+  // アニメーション用
+  const [animating, setAnimating] = useState(false);
+  const [animFrom, setAnimFrom] = useState<FrameState | null>(null);
+  const [animTo, setAnimTo] = useState<FrameState | null>(null);
+
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const firstFrameRef = useRef<HTMLDivElement | null>(null);
 
   // コーパス読み込み
   useEffect(() => {
@@ -158,7 +313,10 @@ export default function App() {
         const txt = await res.text();
         const parsed = parseCorpus(txt);
         setCorpus(parsed);
-        setCurrent(randomPair(parsed));
+        const initialQ = randomPair(parsed);
+        if (initialQ) {
+          setFrame({ lastResult: null, current: initialQ });
+        }
       } finally {
         setLoading(false);
       }
@@ -166,37 +324,112 @@ export default function App() {
     load();
   }, []);
 
-  const nextQuestion = () => {
-    if (!corpus.length) return;
-    setCurrent(randomPair(corpus));
-    setUserAnswer("");
+  const pickNextQuestion = () => {
+    if (!corpus.length) return null;
+    return randomPair(corpus);
   };
 
   const handleCheck = async () => {
-    if (!current) return;
+    if (!frame) return;
     if (!userAnswer.trim()) return;
 
+    const current = frame.current;
     setChecking(true);
 
     const evalText = evaluateAnswer(current.eng, userAnswer);
     const grammarMessages = await checkGrammar(userAnswer);
 
-    // === 直前の結果を上部に1つだけ保持 ===
-    setLastResult({
+    const newResult: LastResult = {
       jpn: current.jpn,
       eng: current.eng,
       userAnswer,
       evalText,
       grammarMessages,
-    });
+    };
+    const newQuestion = pickNextQuestion();
+    if (!newQuestion) {
+      // コーパスがないなどのフォールバック
+      setChecking(false);
+      return;
+    }
 
-    nextQuestion();
-    setChecking(false);
+    // アニメーション用の from/to フレームを用意
+    const fromFrame: FrameState = {
+      lastResult: frame.lastResult,
+      current: frame.current,
+    };
+    const toFrame: FrameState = {
+      lastResult: newResult,
+      current: newQuestion,
+    };
+
+    setAnimFrom(fromFrame);
+    setAnimTo(toFrame);
+    setAnimating(true);
   };
 
-  if (loading || !current) {
+  // 紙芝居スクロールアニメーション
+  useLayoutEffect(() => {
+    if (!animating) return;
+    if (!viewportRef.current || !stripRef.current || !firstFrameRef.current)
+      return;
+    if (!animFrom || !animTo) return;
+
+    const viewport = viewportRef.current;
+    const strip = stripRef.current;
+    const firstFrameEl = firstFrameRef.current;
+
+    const h = firstFrameEl.offsetHeight;
+    if (!h) {
+      // 高さが取れないときはフォールバックして即切り替え
+      setFrame(animTo);
+      setAnimating(false);
+      setAnimFrom(null);
+      setAnimTo(null);
+      setUserAnswer("");
+      setChecking(false);
+      return;
+    }
+
+    // ビューポートを 1 フレーム分の高さに固定
+    viewport.style.height = `${h}px`;
+    gsap.set(strip, { y: 0 });
+
+    const tl = gsap.timeline({
+      defaults: { duration: 0.45, ease: "power2.inOut" },
+      onComplete: () => {
+        // 最終的なフレーム状態に確定
+        setFrame(animTo);
+        setAnimating(false);
+        setAnimFrom(null);
+        setAnimTo(null);
+        setUserAnswer("");
+        setChecking(false);
+
+        viewport.style.height = "";
+        gsap.set(strip, { clearProps: "transform" });
+      },
+    });
+
+    // 1フレーム分きっちり上へスクロール
+    tl.to(strip, { y: -h });
+
+    // StrictMode 対策でクリーンアップ
+    return () => {
+      tl.kill();
+    };
+  }, [animating, animFrom, animTo]);
+
+  if (loading || !frame) {
     return (
-      <Box sx={{ minHeight: "100vh", display: "flex", justifyContent: "center", alignItems: "center" }}>
+      <Box
+        sx={{
+          minHeight: "100vh",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
         <CircularProgress />
       </Box>
     );
@@ -205,110 +438,41 @@ export default function App() {
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
       <CssBaseline />
-      <AppBar position="static">
+      <AppBar position="sticky">
         <Toolbar>
           <TranslateIcon sx={{ mr: 1 }} />
-          <Typography variant="h6">Endless Translating App</Typography>
+          <Typography variant="h6" sx={{ flexGrow: 1 }}>
+            Endless Translating App
+          </Typography>
         </Toolbar>
       </AppBar>
 
       <Container maxWidth="md" sx={{ py: 4 }}>
-        <Stack spacing={4}>
+        {/* 通常時：1フレームだけ（上：結果 / 下：問題） */}
+        {!animating && (
+          <Frame
+            frame={frame}
+            userAnswer={userAnswer}
+            checking={checking}
+            interactive={true}
+            onChangeAnswer={setUserAnswer}
+            onSubmit={handleCheck}
+          />
+        )}
 
-          {/* =============================
-              上部：前回の結果 or アプリ説明
-          ============================== */}
-          <Paper sx={{ p: 3, borderRadius: 3 }}>
-            {!lastResult ? (
-              <>
-                <Typography variant="h5">無限英訳トレーニング</Typography>
-                <Typography variant="body2" sx={{ mt: 2 }}>
-                  日本語が出ますので英訳してください。  
-                  採点後、この部分に結果が表示されます。  
-                  常に「上：結果」「下：次の問題」の構成です。
-                </Typography>
-              </>
-            ) : (
-              <>
-                <Typography variant="h6">直前の結果</Typography>
-
-                <Typography variant="subtitle2" sx={{ mt: 2 }}>
-                  Japanese
-                </Typography>
-                <Typography>{lastResult.jpn}</Typography>
-
-                <Typography variant="subtitle2" sx={{ mt: 2 }}>
-                  Model Answer
-                </Typography>
-                <Typography>{lastResult.eng}</Typography>
-
-                <Typography variant="subtitle2" sx={{ mt: 2 }}>
-                  Your Answer
-                </Typography>
-                <Typography>{lastResult.userAnswer}</Typography>
-
-                <Typography variant="subtitle2" sx={{ mt: 2 }}>
-                  Result
-                </Typography>
-                <Alert severity={
-                  lastResult.evalText.startsWith("◎")
-                    ? "success"
-                    : lastResult.evalText.startsWith("○")
-                    ? "info"
-                    : lastResult.evalText.startsWith("△")
-                    ? "warning"
-                    : "error"
-                }>
-                  {lastResult.evalText}
-                </Alert>
-
-                <Typography variant="subtitle2" sx={{ mt: 2 }}>
-                  Grammar
-                </Typography>
-                {lastResult.grammarMessages.map((msg, i) => (
-                  <Typography key={i} variant="body2">
-                    {msg}
-                  </Typography>
-                ))}
-              </>
-            )}
-          </Paper>
-
-          {/* =============================
-              下部：現在の問題
-          ============================== */}
-          <Paper sx={{ p: 3, borderRadius: 3 }}>
-            <Typography variant="subtitle2">Japanese (Current)</Typography>
-            <Typography variant="h6" sx={{ mt: 1 }}>
-              {current.jpn}
-            </Typography>
-
-            <TextField
-              label="Your English"
-              multiline
-              fullWidth
-              minRows={2}
-              sx={{ mt: 3 }}
-              value={userAnswer}
-              onChange={(e) => setUserAnswer(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                  handleCheck();
-                }
-              }}
-            />
-
-            <Button
-              variant="contained"
-              sx={{ mt: 2 }}
-              onClick={handleCheck}
-              disabled={checking}
-            >
-              {checking ? "Checking..." : "採点 → 次の問題へ"}
-            </Button>
-          </Paper>
-
-        </Stack>
+        {/* アニメーション中：旧フレーム＋新フレームを縦に並べて strip をスクロール */}
+        {animating && animFrom && animTo && (
+          <Box ref={viewportRef} sx={{ overflow: "hidden" }}>
+            <Box ref={stripRef}>
+              <Box ref={firstFrameRef}>
+                <Frame frame={animFrom} interactive={false} />
+              </Box>
+              <Box>
+                <Frame frame={animTo} interactive={false} />
+              </Box>
+            </Box>
+          </Box>
+        )}
       </Container>
     </Box>
   );
