@@ -1,5 +1,5 @@
-// src/App.tsx
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { MutableRefObject } from "react";
 import {
   AppBar,
   Box,
@@ -154,6 +154,8 @@ type FrameProps = {
   interactive?: boolean;
   onChangeAnswer?: (v: string) => void;
   onSubmit?: () => void;
+  // 型を useRef と合わせる
+  inputRef?: MutableRefObject<HTMLInputElement | null>;
 };
 
 function Frame({
@@ -163,6 +165,7 @@ function Frame({
   interactive = false,
   onChangeAnswer,
   onSubmit,
+  inputRef,
 }: FrameProps) {
   const { lastResult, current } = frame;
 
@@ -258,6 +261,7 @@ function Frame({
           minRows={2}
           sx={{ mt: 1 }}
           value={userAnswer}
+          inputRef={inputRef} // フォーカス用
           onChange={
             interactive
               ? (e) => onChangeAnswer && onChangeAnswer(e.target.value)
@@ -312,6 +316,9 @@ export default function App() {
   const stripRef = useRef<HTMLDivElement | null>(null);
   const firstFrameRef = useRef<HTMLDivElement | null>(null);
 
+  // 入力欄へのフォーカス用 ref
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
   // コーパス読み込み
   useEffect(() => {
     const load = async () => {
@@ -330,6 +337,13 @@ export default function App() {
     };
     load();
   }, []);
+
+  // フレーム表示中かつ非アニメ中は常に入力欄にフォーカス
+  useEffect(() => {
+    if (!animating && frame && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [frame, animating]);
 
   const pickNextQuestion = () => {
     if (!corpus.length) return null;
@@ -355,7 +369,6 @@ export default function App() {
     };
     const newQuestion = pickNextQuestion();
     if (!newQuestion) {
-      // コーパスがないなどのフォールバック
       setChecking(false);
       return;
     }
@@ -421,7 +434,6 @@ export default function App() {
     // 1フレーム分きっちり上へスクロール
     tl.to(strip, { y: -h });
 
-    // StrictMode 対策でクリーンアップ
     return () => {
       tl.kill();
     };
@@ -464,6 +476,7 @@ export default function App() {
             interactive={true}
             onChangeAnswer={setUserAnswer}
             onSubmit={handleCheck}
+            inputRef={inputRef} // ここで ref を渡す
           />
         )}
 
