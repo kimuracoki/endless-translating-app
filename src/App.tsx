@@ -39,6 +39,14 @@ type LTResponse = {
   matches: LTMatch[];
 };
 
+type LastResult = {
+  jpn: string;
+  eng: string;
+  userAnswer: string;
+  evalText: string;
+  grammarMessages: string[];
+};
+
 // ===============================
 // コーパス読み込み・解析
 // ===============================
@@ -156,9 +164,7 @@ async function checkGrammar(sentence: string): Promise<string[]> {
   });
 
   if (!res.ok) {
-    return [
-      `LanguageTool HTTPエラー: ${res.status} ${res.statusText}`,
-    ];
+    return [`LanguageTool HTTPエラー: ${res.status} ${res.statusText}`];
   }
 
   const json = (await res.json()) as LTResponse;
@@ -197,8 +203,7 @@ export default function App() {
   const [userAnswer, setUserAnswer] = useState("");
   const [checking, setChecking] = useState(false);
 
-  const [resultText, setResultText] = useState<string | null>(null);
-  const [grammarMessages, setGrammarMessages] = useState<string[]>([]);
+  const [lastResult, setLastResult] = useState<LastResult | null>(null);
   const [generalError, setGeneralError] = useState<string | null>(null);
 
   // コーパス読み込み
@@ -217,15 +222,20 @@ export default function App() {
         setCorpus(parsed);
         setCurrent(randomPair(parsed));
       } catch (e: any) {
-        setCorpusError(
-          `コーパス読み込みエラー: ${e?.message ?? String(e)}`
-        );
+        setCorpusError(`コーパス読み込みエラー: ${e?.message ?? String(e)}`);
       } finally {
         setLoadingCorpus(false);
       }
     };
     load();
   }, []);
+
+  const gotoNextQuestion = () => {
+    if (!corpus.length) return;
+    setCurrent(randomPair(corpus));
+    setUserAnswer("");
+    setGeneralError(null);
+  };
 
   const handleCheck = async () => {
     if (!current) return;
@@ -239,11 +249,21 @@ export default function App() {
     try {
       // 採点
       const evalText = evaluateAnswer(current.eng, userAnswer);
-      setResultText(evalText);
 
       // 文法チェック
-      const msgs = await checkGrammar(userAnswer);
-      setGrammarMessages(msgs);
+      const grammarMessages = await checkGrammar(userAnswer);
+
+      // 直前の問題の結果として保存
+      setLastResult({
+        jpn: current.jpn,
+        eng: current.eng,
+        userAnswer: userAnswer,
+        evalText,
+        grammarMessages,
+      });
+
+      // すぐ次の問題へ（CLI のループ風）
+      gotoNextQuestion();
     } catch (e: any) {
       setGeneralError(
         `文法チェック中にエラーが発生しました: ${e?.message ?? String(e)}`
@@ -251,15 +271,6 @@ export default function App() {
     } finally {
       setChecking(false);
     }
-  };
-
-  const handleNext = () => {
-    if (!corpus.length) return;
-    setCurrent(randomPair(corpus));
-    setUserAnswer("");
-    setResultText(null);
-    setGrammarMessages([]);
-    setGeneralError(null);
   };
 
   // ===========================
@@ -283,7 +294,9 @@ export default function App() {
   if (corpusError || !current) {
     return (
       <Box sx={{ minHeight: "100vh", p: 4 }}>
-        <Alert severity="error">{corpusError ?? "問題が取得できません。"}</Alert>
+        <Alert severity="error">
+          {corpusError ?? "問題が取得できません。"}
+        </Alert>
       </Box>
     );
   }
@@ -306,17 +319,15 @@ export default function App() {
         <Paper elevation={2} sx={{ p: 3, borderRadius: 3 }}>
           <Stack spacing={3}>
             <Typography variant="h5" component="h1">
-             Endless Tranlating 
+              Endless
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              日本語の文がランダムに表示されます。英訳を入力して採点と文法チェックを行います。
+              Description
             </Typography>
 
-            {generalError && (
-              <Alert severity="warning">{generalError}</Alert>
-            )}
+            {generalError && <Alert severity="warning">{generalError}</Alert>}
 
-            {/* 日本語の問題 */}
+            {/* 現在の日本語の問題 */}
             <Box
               sx={{
                 p: 2,
@@ -327,7 +338,7 @@ export default function App() {
               }}
             >
               <Typography variant="subtitle2" gutterBottom>
-                Japanese
+                Japanese (Current)
               </Typography>
               <Typography variant="body1">{current.jpn}</Typography>
             </Box>
@@ -340,6 +351,16 @@ export default function App() {
               value={userAnswer}
               onChange={(e) => setUserAnswer(e.target.value)}
               fullWidth
+              onKeyDown={(e) => {
+                // Ctrl+Enter で採点して次へ進むショートカット
+                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                  e.preventDefault();
+                  if (!checking) {
+                    handleCheck();
+                  }
+                }
+              }}
+              helperText="Ctrl+Enter で採点して次の問題へ進みます。"
             />
 
             <Stack direction="row" spacing={2}>
@@ -348,22 +369,19 @@ export default function App() {
                 onClick={handleCheck}
                 disabled={checking}
               >
-                {checking ? "Checking..." : "採点・文法チェック"}
-              </Button>
-              <Button
-                variant="outlined"
-                onClick={handleNext}
-                disabled={checking}
-              >
-                次の問題
+                {checking ? "Checking..." : "採点・文法チェック ＋ 次の問題"}
               </Button>
             </Stack>
 
-            {/* 結果表示 */}
-            {resultText && (
+            {/* 直前の問題の結果表示 */}
+            {lastResult && (
               <>
                 <Divider sx={{ my: 2 }} />
-                <Typography variant="subtitle1">Model answer</Typography>
+                <Typography variant="h6">直前の問題の結果</Typography>
+
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>
+                  Japanese
+                </Typography>
                 <Box
                   sx={{
                     p: 2,
@@ -373,27 +391,59 @@ export default function App() {
                     bgcolor: "background.default",
                   }}
                 >
-                  <Typography variant="body1">{current.eng}</Typography>
+                  <Typography variant="body1">{lastResult.jpn}</Typography>
                 </Box>
 
-                <Typography variant="subtitle1" sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mt: 2 }}>
+                  Model answer
+                </Typography>
+                <Box
+                  sx={{
+                    p: 2,
+                    borderRadius: 2,
+                    border: "1px solid",
+                    borderColor: "divider",
+                    bgcolor: "background.default",
+                  }}
+                >
+                  <Typography variant="body1">{lastResult.eng}</Typography>
+                </Box>
+
+                <Typography variant="subtitle2" sx={{ mt: 2 }}>
+                  Your answer
+                </Typography>
+                <Box
+                  sx={{
+                    p: 2,
+                    borderRadius: 2,
+                    border: "1px solid",
+                    borderColor: "divider",
+                    bgcolor: "background.default",
+                  }}
+                >
+                  <Typography variant="body1">
+                    {lastResult.userAnswer}
+                  </Typography>
+                </Box>
+
+                <Typography variant="subtitle2" sx={{ mt: 2 }}>
                   Result
                 </Typography>
                 <Alert
                   severity={
-                    resultText.startsWith("◎")
+                    lastResult.evalText.startsWith("◎")
                       ? "success"
-                      : resultText.startsWith("○")
+                      : lastResult.evalText.startsWith("○")
                       ? "info"
-                      : resultText.startsWith("△")
+                      : lastResult.evalText.startsWith("△")
                       ? "warning"
                       : "error"
                   }
                 >
-                  {resultText}
+                  {lastResult.evalText}
                 </Alert>
 
-                <Typography variant="subtitle1" sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mt: 2 }}>
                   Grammar check (LanguageTool)
                 </Typography>
                 <Box
@@ -405,17 +455,15 @@ export default function App() {
                     bgcolor: "background.default",
                   }}
                 >
-                  {checking && <CircularProgress size={20} />}
-                  {!checking &&
-                    grammarMessages.map((msg, idx) => (
-                      <Typography
-                        variant="body2"
-                        key={idx}
-                        sx={{ whiteSpace: "pre-wrap" }}
-                      >
-                        {msg}
-                      </Typography>
-                    ))}
+                  {lastResult.grammarMessages.map((msg, idx) => (
+                    <Typography
+                      variant="body2"
+                      key={idx}
+                      sx={{ whiteSpace: "pre-wrap" }}
+                    >
+                      {msg}
+                    </Typography>
+                  ))}
                 </Box>
               </>
             )}
