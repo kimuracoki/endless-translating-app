@@ -105,8 +105,7 @@ function jaccardSimilarity(a: string[], b: string[]): number {
 }
 
 function evaluateAnswer(model: string, user: string): string {
-  if (normalizeExact(model) === normalizeExact(user))
-    return "◎ 完全一致です。";
+  if (normalizeExact(model) === normalizeExact(user)) return "◎ 完全一致です。";
 
   const sim = jaccardSimilarity(tokenize(model), tokenize(user));
 
@@ -175,9 +174,17 @@ function Frame({
           <>
             <Typography variant="h5">無限英訳トレーニング</Typography>
             <Typography variant="body2" sx={{ mt: 2 }}>
-              日本語が出ますので英訳してください。
-              採点後、この部分に直前の結果が表示されます。
-              常に「上：結果」「下：次の問題」の 2 ブロックだけです。
+              日本語をとにかく英訳してください。
+              <br />
+              問題は尽きることがないので、尽きるとしたら、あなたの体力の方でしょう。
+              <br />
+            </Typography>
+            <Typography variant="body2" sx={{ mt: 2 }}>
+              回答後、模範解答と簡易的な文法チェック結果を表示します。
+              <br />
+              模範解答だけが正解ではありません。
+              <br />
+              参考程度にして、さっさと次に進みましょう。
             </Typography>
           </>
         ) : (
